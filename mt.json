@@ -1,0 +1,6 @@
+{
+    "name": "stream",
+    "paths": ["."],
+    "entrypoint": "stream",
+    "dependencies": { }
+}

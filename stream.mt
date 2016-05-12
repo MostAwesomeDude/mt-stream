@@ -1,3 +1,5 @@
+import "unittest" =~ [=> unittest]
+import "stream/tools" =~ [=> wrapStream :DeepFrozen]
 exports (main)
 
 object nullStream as DeepFrozen:
@@ -19,69 +21,79 @@ object nullStream as DeepFrozen:
     to asStream():
         return null
 
-    to asList():
-        return []
-
 object makeStream as DeepFrozen:
     "Produce streams of values."
 
     to run(stream):
-        return when (stream) ->
-            if (_equalizer.sameYet(stream, null)):
+        return when (stream) -> {
+            wrapStream(if (_equalizer.sameYet(stream, null)) {
                 nullStream
-            else:
+            } else {
                 def [value, resume, next] := stream
-                var resumed :Bool := false
-                def resumeOnce():
-                    return if (!resumed):
-                        resumed := true
-                        resume<-(true)
-                object valueStream:
-                    to _printOn(out):
+                object valueStream {
+                    to _printOn(out) {
                         out.print(`[$value, $next]`)
+                    }
 
-                    to map(f):
-                        # Optimization: Pass the resumer directly onwards.
-                        return makeStream([f(value), resume, next<-map(f)])
+                    to map(f) {
+                        # As an optimization, pass the resumer directly
+                        # onwards. To keep track of errors, and to allow
+                        # returning promises, use a when-block.
+                        return when (def p := f<-(value)) -> {
+                            makeStream([p, resume, next<-map(f)])
+                        }
+                    }
 
-                    to fold(f, x):
-                        return when (resumeOnce()) ->
-                            next<-fold(f, f(x, value))
+                    to fold(f, x) {
+                        def p := f<-(x, value)
+                        return when (resume<-(true), p) -> { next<-fold(f, p) }
+                    }
 
-                    to filter(f):
-                        return if (f(value)):
+                    to filter(f) {
+                        return if (f(value)) {
                             makeStream([value, resume, next<-filter(f)])
-                        else:
-                            when (resumeOnce()) ->
+                        } else {
+                            when (resume<-(true)) -> {
                                 next<-filter(f)
+                            }
+                        }
+                    }
 
-                    to zip(stream):
+                    to zip(stream) {
                         # We've gotta unwrap. Assume it responds to
                         # .asStream/0.
-                        return when (stream) ->
-                            when (def p := stream<-asStream()) ->
-                                if (_equalizer.sameYet(p, null)):
+                        return when (stream) -> {
+                            when (def p := stream<-asStream()) -> {
+                                if (_equalizer.sameYet(p, null)) {
                                     nullStream
-                                else:
+                                } else {
                                     def [v, r, n] := p
                                     makeStream([[value, v],
                                                 fn b {resume(b); r(b)},
                                                 next<-zip(n)])
+                                }
+                            }
+                        }
+                    }
 
-                    to asStream():
+                    to asStream() {
                         return stream
-
-                    to asList():
-                        return when (def xs := next<-asList()) ->
-                            [value] + xs
+                    }
+                }
+            })
+        }
 
     to unfold(f):
         return escape ej:
             def value := f(ej)
             def [p, r] := Ref.promise()
-            def resume(b :Bool):
+            var once :Bool := false
+            def resume(b):
+                if (once):
+                    return
+                once := true
                 if (b):
-                    r.resolve(makeStream.unfold(f))
+                    r.resolve(makeStream.unfold(f), false)
                 else:
                     r.smash("makeStream.unfold/1: Cancelled")
             makeStream([value, resume, p])
@@ -94,13 +106,30 @@ object makeStream as DeepFrozen:
     to fromIterable(iterable):
         return makeStream.fromIterator(iterable._makeIterator())
 
+def testStreamAsList(assert):
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])
+    def snd([_, x]) {return x}
+    return when (def l := stream<-map(snd)<-asList()) ->
+        assert.equal(l, [1, 2, 3, 4, 5])
+
+def testStreamSize(assert):
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])
+    return when (def size := stream<-size()) ->
+        assert.equal(size, 5)
+
+unittest([
+    testStreamAsList,
+    testStreamSize,
+])
+
 def main(argv) as DeepFrozen:
     def l := makeStream.fromIterable([1, 2, 3, 4, 5])
     def p := l<-map(fn [_, x] {x})<-map(fn x {x + 1})
-    def q := p<-fold(fn x, y { x + y }, 0)
-    def r := p<-filter(fn x {(x % 2) == 0})<-asList()
-    def z := l<-zip(p)
-    traceln(`Before: $l, $p, $q, $r, $z`)
-    return when (p, q, r) ->
-        traceln(`After: $l, $p, $q, $r, $z`)
+    def z := l<-zip(p)<-asList()
+    traceln(`Before: $l, $p, $z`)
+    return when (z) ->
+        traceln(`After: $l, $p, $z`)
         when (null) -> {0}
+    catch p:
+        traceln.exception(p)
+        1
