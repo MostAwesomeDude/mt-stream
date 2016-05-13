@@ -28,7 +28,6 @@ object makeStream as DeepFrozen:
                     to asStream() { return null }
 
                     to scan(_, z) {
-                        traceln(`scan(_, $z)`)
                         return makeStream([z, fn _ {null}, nullStream])
                     }
                 }
@@ -90,10 +89,8 @@ object makeStream as DeepFrozen:
                     }
 
                     to scan(f, x) {
-                        traceln(`scan($f, $x) $value`)
                         def [p, r] := Ref.promise()
                         def resumeScan(b :Bool) {
-                            traceln(`scan($f, $x) resume $b`)
                             if (b) {
                                 # Ugh, we gotta pass stuff on manually here.
                                 # There's no way to auto-chain this that I
