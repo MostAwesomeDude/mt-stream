@@ -2,32 +2,36 @@ import "unittest" =~ [=> unittest]
 import "stream/tools" =~ [=> wrapStream :DeepFrozen]
 exports (main)
 
-object nullStream as DeepFrozen:
-    to _printOn(out):
-        out.print("null")
+def snd([_, x]) as DeepFrozen:
+    return x
 
-    to map(_):
-        return nullStream
-
-    to fold(_, x):
-        return x
-
-    to filter(_):
-        return nullStream
-
-    to zip(_):
-        return nullStream
-
-    to asStream():
-        return null
+def makeOnce(f) as DeepFrozen:
+    var b :Bool := false
+    return def once(x):
+        if (!b):
+            b := true
+            f(x)
 
 object makeStream as DeepFrozen:
     "Produce streams of values."
 
     to run(stream):
         return when (stream) -> {
-            wrapStream(if (_equalizer.sameYet(stream, null)) {
-                nullStream
+            wrapStream(makeStream, if (_equalizer.sameYet(stream, null)) {
+                object nullStream {
+                    to _printOn(out) { out.print("null") }
+                    to map(_) { return nullStream }
+                    to fold(_, x) { return x }
+                    to filter(_) { return nullStream }
+                    to zip(_) { return nullStream }
+                    to chain(stream) { return stream }
+                    to asStream() { return null }
+
+                    to scan(_, z) {
+                        traceln(`scan(_, $z)`)
+                        return makeStream([z, fn _ {null}, nullStream])
+                    }
+                }
             } else {
                 def [value, resume, next] := stream
                 object valueStream {
@@ -62,18 +66,48 @@ object makeStream as DeepFrozen:
                     to zip(stream) {
                         # We've gotta unwrap. Assume it responds to
                         # .asStream/0.
-                        return when (stream) -> {
-                            when (def p := stream<-asStream()) -> {
-                                if (_equalizer.sameYet(p, null)) {
-                                    nullStream
-                                } else {
-                                    def [v, r, n] := p
-                                    makeStream([[value, v],
-                                                fn b {resume(b); r(b)},
-                                                next<-zip(n)])
-                                }
+                        return when (def p := stream<-asStream()) -> {
+                            if (_equalizer.sameYet(p, null)) {
+                                makeStream(null)
+                            } else {
+                                def [v, r, n] := p
+                                makeStream([[value, v],
+                                            fn b {resume(b); r(b)},
+                                            next<-zip(n)])
                             }
                         }
+                    }
+
+                    to chain(stream) {
+                        "Fuse two streams together lengthwise.
+
+                         Named after itertools.chain(), because Haskell's (++) is
+                         pronounced 'append'."
+
+                        # As with .map(), cheat on resuming.
+                        return makeStream([value, resume,
+                                           next<-chain(stream)])
+                    }
+
+                    to scan(f, x) {
+                        traceln(`scan($f, $x) $value`)
+                        def [p, r] := Ref.promise()
+                        def resumeScan(b :Bool) {
+                            traceln(`scan($f, $x) resume $b`)
+                            if (b) {
+                                # Ugh, we gotta pass stuff on manually here.
+                                # There's no way to auto-chain this that I
+                                # know of.
+                                when (def y := f<-(x, value)) -> {
+                                    r.resolve(next<-scan(f, y), false)
+                                } catch problem {
+                                    r.smash(problem)
+                                }
+                            } else {
+                                r.smash("stream.scan/2: Cancelled")
+                            }
+                        }
+                        return makeStream([x, makeOnce(resumeScan), p])
                     }
 
                     to asStream() {
@@ -87,16 +121,12 @@ object makeStream as DeepFrozen:
         return escape ej:
             def value := f(ej)
             def [p, r] := Ref.promise()
-            var once :Bool := false
-            def resume(b):
-                if (once):
-                    return
-                once := true
+            def resumeUnfold(b :Bool):
                 if (b):
                     r.resolve(makeStream.unfold(f), false)
                 else:
                     r.smash("makeStream.unfold/1: Cancelled")
-            makeStream([value, resume, p])
+            makeStream([value, makeOnce(resumeUnfold), p])
         catch _:
             makeStream(null)
 
@@ -106,10 +136,20 @@ object makeStream as DeepFrozen:
     to fromIterable(iterable):
         return makeStream.fromIterator(iterable._makeIterator())
 
+def testStreamChain(assert):
+    def first := makeStream.fromIterable([1, 2, 3])<-map(snd)
+    def second := makeStream.fromIterable([4, 5, 6])<-map(snd)
+    return when (def l := first<-chain(second)<-asList()) ->
+        assert.equal(l, [1, 2, 3, 4, 5, 6])
+
+def testStreamScan(assert):
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])<-map(snd)
+    return when (def l := stream<-scan(fn x, y { x + y }, 0)<-asList()) ->
+        assert.equal(l, [0, 1, 3, 6, 10, 15])
+
 def testStreamAsList(assert):
-    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])
-    def snd([_, x]) {return x}
-    return when (def l := stream<-map(snd)<-asList()) ->
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])<-map(snd)
+    return when (def l := stream<-asList()) ->
         assert.equal(l, [1, 2, 3, 4, 5])
 
 def testStreamSize(assert):
@@ -118,17 +158,20 @@ def testStreamSize(assert):
         assert.equal(size, 5)
 
 unittest([
+    testStreamChain,
+    testStreamScan,
     testStreamAsList,
     testStreamSize,
 ])
 
 def main(argv) as DeepFrozen:
     def l := makeStream.fromIterable([1, 2, 3, 4, 5])
-    def p := l<-map(fn [_, x] {x})<-map(fn x {x + 1})
+    def p := l<-map(snd)<-map(fn x {x + 1})
     def z := l<-zip(p)<-asList()
-    traceln(`Before: $l, $p, $z`)
-    return when (z) ->
-        traceln(`After: $l, $p, $z`)
+    def y := l<-map(snd)<-scan(fn x, y {x + y}, 0)<-asList()
+    traceln(`Before: $z, $y`)
+    return when (z, y) ->
+        traceln(`After: $z, $y`)
         when (null) -> {0}
     catch p:
         traceln.exception(p)
