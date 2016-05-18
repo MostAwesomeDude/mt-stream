@@ -154,11 +154,21 @@ def testStreamSize(assert):
     return when (def size := stream<-size()) ->
         assert.equal(size, 5)
 
+def testStreamMapVia(assert):
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])<-map(snd)
+    def v(x, ej):
+        if (x % 2 == 0):
+            ej()
+        return x + 1
+    return when (def l := stream<-mapVia(v)<-asList()) ->
+        assert.equal(l, [2, 4, 6])
+
 unittest([
     testStreamChain,
     testStreamScan,
     testStreamAsList,
     testStreamSize,
+    testStreamMapVia,
 ])
 
 def main(argv) as DeepFrozen:

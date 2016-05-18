@@ -18,3 +18,12 @@ def wrapStream(makeStream, stream) as DeepFrozen:
             def sizeFold(counter :Int, _) :Int:
                 return counter + 1
             return stream<-fold(sizeFold, 0)
+
+        to mapVia(transformer):
+            "Apply a via-like transformation to the stream, discarding any
+             elements which don't apply."
+
+            object sentinel {}
+            def viaMap(x):
+                return escape ej { transformer(x, ej) } catch _ { sentinel }
+            return stream<-map(viaMap)<-filter(fn x { x != sentinel })
