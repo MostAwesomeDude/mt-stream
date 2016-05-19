@@ -1,6 +1,6 @@
 import "unittest" =~ [=> unittest]
 import "stream/tools" =~ [=> wrapStream :DeepFrozen]
-exports (main)
+exports (Stream, makeStream, main)
 
 def snd([_, x]) as DeepFrozen:
     return x
@@ -12,13 +12,24 @@ def makeOnce(f) as DeepFrozen:
             b := true
             f(x)
 
+interface _Stream :DeepFrozen {}
+
+object Stream extends _Stream as DeepFrozen:
+    to get(subGuard :DeepFrozen):
+        return object SubStream as DeepFrozen:
+            to coerce(specimen, ej):
+                def stream :Stream exit ej := specimen
+                def [value :subGuard, _, _] exit ej := stream.asStream()
+                return stream
+
 object makeStream as DeepFrozen:
     "Produce streams of values."
 
     to run(stream):
         return when (stream) -> {
-            wrapStream(makeStream, if (_equalizer.sameYet(stream, null)) {
-                object nullStream {
+            wrapStream(_Stream, makeStream,
+                       if (_equalizer.sameYet(stream, null)) {
+                object nullStream as _Stream {
                     to _printOn(out) { out.print("null") }
                     to map(_) { return nullStream }
                     to fold(_, x) { return x }
@@ -33,7 +44,7 @@ object makeStream as DeepFrozen:
                 }
             } else {
                 def [value, resume, next] := stream
-                object valueStream {
+                object valueStream as _Stream {
                     to _printOn(out) {
                         out.print(`[$value, $next]`)
                     }
@@ -133,6 +144,29 @@ object makeStream as DeepFrozen:
     to fromIterable(iterable):
         return makeStream.fromIterator(iterable._makeIterator())
 
+# XXX should move to common code
+def upgradeAssert(assert):
+    return object upgradedAssert extends assert:
+        to passes(specimen, guard) :Void:
+            if (guard !~ _ :DeepFrozen):
+                traceln(`assert.passes/2: Guard not DF (and possibly retractable)`)
+            if (specimen !~ _ :guard):
+                assert.fail(`Specimen didn't pass guard: $specimen !~ _ :$guard`)
+
+        to doesNotPass(specimen, guard) :Void:
+            if (guard !~ _ :DeepFrozen):
+                traceln(`assert.doesNotPass/2: Guard not DF (and possibly retractable)`)
+            if (specimen =~ _ :guard):
+                assert.fail(`Specimen passed guard: $specimen =~ _ :$guard`)
+
+def testStreamGuard(var assert):
+    assert := upgradeAssert(assert)
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 5])
+    return when (stream) ->
+        assert.passes(stream, Stream)
+        assert.passes(stream, Stream[Pair[Int, Int]])
+        assert.doesNotPass(stream, Stream[Char])
+
 def testStreamChain(assert):
     def first := makeStream.fromIterable([1, 2, 3])<-map(snd)
     def second := makeStream.fromIterable([4, 5, 6])<-map(snd)
@@ -164,6 +198,7 @@ def testStreamMapVia(assert):
         assert.equal(l, [2, 4, 6])
 
 unittest([
+    testStreamGuard,
     testStreamChain,
     testStreamScan,
     testStreamAsList,

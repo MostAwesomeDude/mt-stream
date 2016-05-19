@@ -1,9 +1,9 @@
 exports (wrapStream)
 
-def wrapStream(makeStream, stream) as DeepFrozen:
+def wrapStream(Stream, makeStream, stream) as DeepFrozen:
     "Wrap a stream with a bevy of useful tools."
 
-    return object wrappedStream extends stream:
+    return object wrappedStream extends stream as Stream:
         "A stream with many useful methods."
 
         to _printOn(out):
