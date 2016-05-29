@@ -14,6 +14,11 @@ def wrapStream(Stream, makeStream, stream) as DeepFrozen:
                 return l.with(x)
             return stream<-fold(listFold, [])
 
+        to asSet():
+            def setFold(s :Set, x) :Set:
+                return s.with(x)
+            return stream<-fold(setFold, [].asSet())
+
         to size():
             def sizeFold(counter :Int, _) :Int:
                 return counter + 1

@@ -183,6 +183,11 @@ def testStreamAsList(assert):
     return when (def l := stream<-asList()) ->
         assert.equal(l, [1, 2, 3, 4, 5])
 
+def testStreamAsSet(assert):
+    def stream := makeStream.fromIterable([1, 2, 3, 4, 1])<-map(snd)
+    return when (def s := stream<-asSet()) ->
+        assert.equal(s, [1, 2, 3, 4].asSet())
+
 def testStreamSize(assert):
     def stream := makeStream.fromIterable([1, 2, 3, 4, 5])
     return when (def size := stream<-size()) ->
@@ -202,6 +207,7 @@ unittest([
     testStreamChain,
     testStreamScan,
     testStreamAsList,
+    testStreamAsSet,
     testStreamSize,
     testStreamMapVia,
 ])
